@@ -143,7 +143,7 @@ CellularQueue::CellularQueue( const string & link_name,
     if ( schedule_.back() == 0 ) {
         throw runtime_error( pdo_trace_filename + ": trace must last for a nonzero amount of time" );
     }
-    
+
 
     /*** Initiate delay queue ***/
      /* open filename and load schedule */
@@ -165,7 +165,6 @@ CellularQueue::CellularQueue( const string & link_name,
 
         uint64_t time_ms =  0;
         int first_packet_delay_ms = -1;
-        int pdo_duration = 0;
         vector<int> packet_delivery_oportunity;
 
         while (getline(iss, word, ' ')) {
@@ -192,15 +191,7 @@ CellularQueue::CellularQueue( const string & link_name,
 
         if (time_ms >= start_timestamp_) {
             uint64_t time = time_ms - start_timestamp_;
-            if (time - temp > 1000) {
-                unsigned int pps = long_pdo_pps.front();
-                long_pdo_pps.pop();
-                long_pdo_pps.push(pps);   
-            }
-            unsigned int pps = long_pdo_pps.front();
-            unsigned int short_pdo_size = packet_delivery_oportunity.size();
-            int pdo_duration_ms = int(short_pdo_size * 1000 / pps) + 1;
-            DelayPDOInstance instance(time, pdo_duration_ms, first_packet_delay_ms, packet_delivery_oportunity);
+            DelayPDOInstance instance(time, first_packet_delay_ms, packet_delivery_oportunity);
             delay_pdo_traces_.push_back( instance );
             // cout << time << " " << pdo_duration_ms << " " << first_packet_delay_ms << " [";
             // for (int i=0; i<packet_delivery_oportunity.size(); i++) {
@@ -209,7 +200,6 @@ CellularQueue::CellularQueue( const string & link_name,
             // cout << "]" << endl;
         }
     }
-
     if (delay_pdo_traces_.size() <= 2) {
         throw runtime_error( packet_train_trace_filename + ": there should be at least three lines" );
     }

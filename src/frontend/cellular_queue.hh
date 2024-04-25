@@ -55,11 +55,10 @@ private:
     public:
         uint64_t time;
         int delay;
-        int pdo_duration;
         std::vector<int> pdo;
 
-        DelayPDOInstance(uint64_t time_, int pdo_duration_, int delay_, std::vector<int> pdo_) :
-            time(time_), pdo_duration(pdo_duration_), delay(delay_), pdo(pdo_)
+        DelayPDOInstance(uint64_t time_, int delay_, std::vector<int> pdo_) :
+            time(time_), delay(delay_), pdo(pdo_)
          { }
 
     };
