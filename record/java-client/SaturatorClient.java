@@ -38,7 +38,7 @@ public class SaturatorClient {
 			expCondition = args[10];
 		}
 
-		Path path = Paths.get(traceDir); // Change to actual path
+		Path path = Paths.get(traceDir);
 
         if (!(Files.exists(path) && Files.isDirectory(path))) {
             System.out.printf("Saturator: trace_out_dir %s does not exists!\n", traceDir);

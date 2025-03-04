@@ -9,7 +9,7 @@ public class PacketTrainClient {
 		String ipAddr = "127.0.0.1";
 		String clientIP = "127.0.0.1";
 		int serverPort = 9003;
-		String traceDir = "/home/william/net-traces";
+		String traceDir = "";
 		
 		// Experiment configs
 		int running_duration_seconds = 10;
@@ -40,7 +40,7 @@ public class PacketTrainClient {
 			expCond = args[11];
 		}
 
-		Path path = Paths.get(traceDir); // Change to actual path
+		Path path = Paths.get(traceDir);
 
         if (!(Files.exists(path) && Files.isDirectory(path))) {
             System.out.printf("PacketTrain: trace_out_dir %s does not exists!\n", traceDir);
