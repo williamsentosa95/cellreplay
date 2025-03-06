@@ -203,7 +203,7 @@ def terminate_client_connection(sender_id, address):
 #         seq_num = seq_num + 1
 #     curr_train_num += 1
 
-def send_packet_train_thread(socket, sender_id, address, gaps, nums, packet_size):
+def send_packet_train_thread(socket, sender_id, address, gaps, nums, packet_size, log_filename):
     global last_recv_client_packet
     global stop_sending
     global curr_train_num
@@ -243,6 +243,8 @@ def send_packet_train_thread(socket, sender_id, address, gaps, nums, packet_size
 
     finally:
         print("Sending to %d has stopped!" % (sender_id))
+        if (log_filename != None):
+            print("Server PacketTrainEchoDynamic packet trace file: %s" % log_filename)
 
 def print_throughputs(throughputs):
     text = "["
@@ -391,7 +393,8 @@ def main(args):
                 curr_packet_size = packet_size
                 curr_echo_to_first_and_tail = echo_to_only_first_and_tail
                 # create log file
-                log_file = open(create_log_dir(trace_folder, "server_dynamic_packet_train_trace", exp_id), "w")
+                log_filename = create_log_dir(trace_folder, "server_dynamic_packet_train_trace", exp_id)
+                log_file = open(log_filename, "w")
                 log_file.write("%s : sender_id=%d train_gap_ms=%s upload=%d num_packets=%s size=%d echo_to_only_first_and_tail=%d\n" % (address, sender_id, curr_gap_ms, curr_upload, curr_num_packets, curr_packet_size, curr_echo_to_first_and_tail))
                 log_file.write("TRAIN_NUM\tSEQ_NUM\tSEND_TIMESTAMP\tRECV_TIMESTAMP\tSENDER_ID\tPACKET_SIZE\tRTT\tTRAIN_SIZE\tTRAIN_GAP_MS\n")
                 log_file.flush()
@@ -405,7 +408,7 @@ def main(args):
                 last_recv_client_packet = time.time_ns()
                 if (curr_upload == 0):
                     stop_sending = False
-                    send_thread = threading.Thread(target=send_packet_train_thread, args=(UDPServerSocket, curr_sender_id, address, curr_gap_ms, curr_num_packets, curr_packet_size))
+                    send_thread = threading.Thread(target=send_packet_train_thread, args=(UDPServerSocket, curr_sender_id, address, curr_gap_ms, curr_num_packets, curr_packet_size, log_filename))
                     send_thread.start()
         else:
             seq_num, sent_timestamp, recv_timestamp, sender_id, train_num, pkt_info, train_size, train_gap_ms = parse_packet(message)

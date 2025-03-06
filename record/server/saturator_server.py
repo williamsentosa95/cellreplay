@@ -120,7 +120,7 @@ def create_data_packet(sender_id, packet_size, now):
     # Fill in the packet info
     return packet
 
-def send_download_saturator_thread(socket, sender_id, address, download_rate, packet_size):
+def send_download_saturator_thread(socket, sender_id, address, download_rate, packet_size, log_filename):
     global last_recv_client_packet
     global stop_sending
 
@@ -161,6 +161,8 @@ def send_download_saturator_thread(socket, sender_id, address, download_rate, pa
                 break            
     finally:
         print("Sending to %d has stopped!" % (sender_id))
+        if (log_filename != None):
+            print("Server Saturator packet trace file: %s" % log_filename)
 
 def create_info_packet(sender_id, curr_time, avg_throughput):
     packet = bytearray(24);
@@ -216,6 +218,7 @@ def main(args):
     log_file = None
 
     exp_id = 0
+    log_filename = None
 
     # Listen for incoming datagrams
     while(True):
@@ -269,14 +272,15 @@ def main(args):
                 # send ACK to client
                 pkt = create_control_packet(sender_id, CONTROL_CONFIG_ACK)
                 UDPServerSocket.sendto(pkt, address)
-                print("%s : %d %d %d %d" % (address, sender_id, upload_rate, download_rate, packet_size))
-                log_file = open(create_log_dir(trace_folder, "saturator_trace", exp_id), "w")
+                print("Addr %s : sender_id=%d up_rate=%d Mbps down_rate=%d Mbps psize=%d bytes" % (address, sender_id, upload_rate, download_rate, packet_size))
+                log_filename = create_log_dir(trace_folder, "saturator_trace", exp_id)
+                log_file = open(log_filename, "w")
                 log_file.write("%s : sender_id=%d upload_rate=%d download_rate=%d packet_size=%d\n" % (address, sender_id, upload_rate, download_rate, packet_size))
                 log_file.write("SEQ_NUM\tSEND_TIMESTAMP\tRECV_TIMESTAMP\tSENDER_ID\tPACKET_SIZE\n")
                 log_file.flush()
                 # Start sending data thread
                 stop_sending = False
-                send_thread = threading.Thread(target=send_download_saturator_thread, args=(UDPServerSocket, curr_sender_id, address, curr_download_rate, curr_packet_size))
+                send_thread = threading.Thread(target=send_download_saturator_thread, args=(UDPServerSocket, curr_sender_id, address, curr_download_rate, curr_packet_size, log_filename))
                 send_thread.start()
         else:
             seq_num, sent_timestamp, recv_timestamp, sender_id = parse_packet(message)

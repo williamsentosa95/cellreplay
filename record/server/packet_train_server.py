@@ -157,7 +157,7 @@ def terminate_client_connection(sender_id, address):
     # Reset all of the variables
     # Close the log
 
-def send_packet_train_thread(socket, sender_id, address, gap_ms, num_packets, packet_size):
+def send_packet_train_thread(socket, sender_id, address, gap_ms, num_packets, packet_size, log_filename):
     global last_recv_client_packet
     global stop_sending
     global curr_train_num
@@ -193,6 +193,9 @@ def send_packet_train_thread(socket, sender_id, address, gap_ms, num_packets, pa
             sleepEvent.wait(3)
     finally:
         print("Sending to %d has stopped!" % (sender_id))
+        if (log_filename != None):
+            print("Server PacketTrain packet trace file: %s" % log_filename)
+
 
 def print_throughputs(throughputs):
     text = "["
@@ -322,16 +325,17 @@ def main(args):
                 curr_download_num_packets = download_num_packets
                 curr_packet_size = packet_size
                 # create log file
-                log_file = open(create_log_dir(trace_folder, "server_packet_train_trace", exp_id), "w")
+                log_filename = create_log_dir(trace_folder, "server_packet_train_trace", exp_id)
+                log_file = open(log_filename, "w")
                 log_file.write("%s : sender_id=%d train_gap_ms=%d up_num=%d down_num=%d size=%d\n" % (address, sender_id, curr_upload_gap_ms, curr_upload_num_packets, curr_download_num_packets, curr_packet_size))
                 log_file.write("TRAIN_NUM\tSEQ_NUM\tSEND_TIMESTAMP\tRECV_TIMESTAMP\tSENDER_ID\tPACKET_SIZE\n")
                 log_file.flush()
                 # send ACK to client
                 pkt = create_control_packet(sender_id, CONTROL_CONFIG_ACK)
                 UDPServerSocket.sendto(pkt, address)
-                print("%s : sender_id=%d up_gap_ms=%d down_gap_ms=%d up_num=%d down_num=%d size=%d" % (address, sender_id, curr_upload_gap_ms, curr_download_gap_ms, curr_upload_num_packets, curr_download_num_packets, curr_packet_size))
+                print("%s : sender_id=%d gap_ms=%d up_num=%d down_num=%d size=%d" % (address, sender_id, curr_upload_gap_ms, curr_upload_num_packets, curr_download_num_packets, curr_packet_size))
                 last_recv_client_packet = time.time_ns()
-                send_thread = threading.Thread(target=send_packet_train_thread, args=(UDPServerSocket, curr_sender_id, address, curr_download_gap_ms, curr_download_num_packets, curr_packet_size))
+                send_thread = threading.Thread(target=send_packet_train_thread, args=(UDPServerSocket, curr_sender_id, address, curr_download_gap_ms, curr_download_num_packets, curr_packet_size, log_filename))
         else:
             seq_num, sent_timestamp, recv_timestamp, sender_id, train_num, pkt_info = parse_packet(message)
             now = time.time_ns()
