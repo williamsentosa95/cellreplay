@@ -43,3 +43,5 @@ Makefile.in
 /src/frontend/nph-*
 
 *.class
+
+!record/java-client/Makefile

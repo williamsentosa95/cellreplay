@@ -1,5 +1,7 @@
 # CellReplay
 
+The technical paper for CellReplay will appear at USENIX NSDI'25.
+
 ## Installation
 Install all the required dependencies using this command.
 
@@ -50,3 +52,17 @@ $HOME/packet-logs \
 ```
 
 An unmodified application can run inside the `mm-cellular` shell and have all their incoming (downlink) and outgoing (uplink) packets delayed as it is going to the real cellular network.
+
+## Citation
+
+If you use CellReplay for your research, we will appreciate if you cite it.
+
+@inproceedings {cellreplay-nsdi25,
+	title = {{CellReplay}: Towards accurate record-and-replay for cellular networks},
+	booktitle = {22nd USENIX Symposium on Networked Systems Design and Implementation (NSDI 25)},
+	year = {2025},
+	address = {Philadelphia, PA},
+	url = {https://www.usenix.org/conference/nsdi25/presentation/sentosa},
+	publisher = {USENIX Association},
+	month = apr
+}
