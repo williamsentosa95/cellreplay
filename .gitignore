@@ -42,3 +42,4 @@ Makefile.in
 /src/frontend/mm-*
 /src/frontend/nph-*
 
+*.class
