@@ -25,6 +25,7 @@ SATURATOR_DURATION_SECONDS = "10"
 
 X = 0.5 # control the number of max tested set of train sizes
 TRAIN_GAP_MS = 100
+NUM_TRIAL_FOR_EACH_PACKET_TRAIN_DYNAMIC_SAMPLE = 3
 
 ##### Fill this with your setup
 
@@ -32,9 +33,7 @@ SERVER_IP = "128.174.246.135"
 # SERVER_IP = "127.0.0.1"
 SSH_USERNAME = "william"
 SERVER_SSH = SSH_USERNAME + "@" + SERVER_IP
-HOME_PATH = "/home/william"
-HOME_PATH_SERVER = "/home/william"
-KEY = HOME_PATH + "/oceanvm.pem" # SSH Key for transfering traces from your remote server 
+KEY = "/home/william/oceanvm.pem" # SSH Key for transfering traces from your remote server 
 
 HOST_TRACE_FOLDER = "/home/william/cellreplay-test"
 SERVER_TRACE_FOLDER = "/home/william/cellreplay-server-trace"
@@ -42,13 +41,15 @@ SERVER_TRACE_FOLDER = "/home/william/cellreplay-server-trace"
 PYTHON3 = "python3.8"
 JAVA = "java"
 
-CLIENT_TEST_IP = "10.251.174.24"
+CLIENT_TEST_IP = "10.251.134.12"
 CLIENT_TEST_DEV = "cscotun0"
 
 SERVER_PORT_SATURATOR = 9000
 SERVER_PORT_PACKET_TRAIN_ECHO_DYNAMIC = 9002
 
 TEST_DIRECTION = 0 # 1 for Uplink (U) and 0 for Downlink (D)
+MAX_UPLINK_BW_MBPS = 20 # Update this based on the MAX UP bandwidth
+MAX_DOWNLINK_BW_MBPS = 300 # Update this based on the MAX DOWN bandwidth
 
 ##############################################################
 
@@ -248,10 +249,15 @@ def get_saturator_throughput(client_folder, server_folder, exp_name, up_mbps, do
 def create_train_sizes(max_pps):
     train_sizes = [5, 10]
 
-    curr_pps = 25
+    curr_pps = 0
+    pps_rate = 25
     while (curr_pps < max_pps):
+        curr_pps += pps_rate
         train_sizes.append(curr_pps)
-        curr_pps += 25
+        if (curr_pps >= 150 and curr_pps < 300):
+            pps_rate = 50
+        elif (curr_pps >= 300):
+            pps_rate = 100
     
     return train_sizes
 
@@ -261,10 +267,6 @@ def main():
     # Need to be changed
     exp_condition = "calibration-packet-train"
     exp_id = random.randint(0, 100000)
-
-    # Our saturator configs
-    saturator_up_mbps = 15
-    saturator_down_mbps = 60
     
     ssh = ["ssh", "-i", KEY, SERVER_SSH]
 
@@ -275,8 +277,8 @@ def main():
     # Saturator
     print("# Running Saturator")
     multiply_ratio = 1.25
-    up_mbps = int(saturator_up_mbps * multiply_ratio)
-    down_mbps = int(saturator_down_mbps * multiply_ratio)
+    up_mbps = int(MAX_UPLINK_BW_MBPS * multiply_ratio)
+    down_mbps = int(MAX_DOWNLINK_BW_MBPS * multiply_ratio)
     exp_name = "Saturator"
     run_saturator(up_mbps, down_mbps, exp_condition, exp_id, exp_name)
     time.sleep(5)
@@ -297,9 +299,9 @@ def main():
     only_echo_first_and_last = 1
 
     if (TEST_DIRECTION == 0):
-        packet_train_echo_dynamic_exp_duration = len(packet_train_echo_dynamic_gap_ms) * len(packet_train_echo_dynamic_down_num) * 5 * 3
+        packet_train_echo_dynamic_exp_duration = len(packet_train_echo_dynamic_gap_ms) * len(packet_train_echo_dynamic_down_num) * 5 * NUM_TRIAL_FOR_EACH_PACKET_TRAIN_DYNAMIC_SAMPLE
     else:
-        packet_train_echo_dynamic_exp_duration = len(packet_train_echo_dynamic_gap_ms) * len(packet_train_echo_dynamic_up_num) * 5 * 3
+        packet_train_echo_dynamic_exp_duration = len(packet_train_echo_dynamic_gap_ms) * len(packet_train_echo_dynamic_up_num) * 5 * NUM_TRIAL_FOR_EACH_PACKET_TRAIN_DYNAMIC_SAMPLE
 
     print("**********************")
     print("Link can support %d pps (@1400 bytes) uplink and %d pps (@1400 bytes) downlink" % (up_max_train_size, down_max_train_size))
