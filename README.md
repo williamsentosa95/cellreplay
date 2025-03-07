@@ -59,6 +59,7 @@ If you use CellReplay for your research, we will appreciate if you cite it.
 
 @inproceedings {cellreplay-nsdi25,
 	title = {{CellReplay}: Towards accurate record-and-replay for cellular networks},
+    author= {William Sentosa and Balakrishnan Chandrasekaran and P. Brighten Godfrey and Haitham Hassanieh},
 	booktitle = {22nd USENIX Symposium on Networked Systems Design and Implementation (NSDI 25)},
 	year = {2025},
 	address = {Philadelphia, PA},
