@@ -1,1 +1,1 @@
-SUBDIRS = util packet graphing frontend
+SUBDIRS = util packet frontend

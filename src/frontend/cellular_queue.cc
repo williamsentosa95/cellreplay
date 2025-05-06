@@ -24,20 +24,18 @@
 
 using namespace std;
 
-#define REVERSE_DIRECTION false
-
 CellularQueue::CellularQueue( const string & link_name, 
-               const string & packet_train_trace_filename, const string & pdo_trace_filename, 
-               const string & packet_log_path_prefix, const string & logfile,
+               const string & packet_train_trace_filename, const string & heavy_pdo_trace_filename, 
+               const string & packet_log_path_prefix, 
                const bool repeat, 
                unique_ptr<AbstractPacketQueue> && packet_queue, 
                bool uplink, uint64_t start_timestamp,
-               const double & loss_rate, const string & drx_trace,
+               const double & loss_rate, 
                const string & psize_latency_offset_trace,
                const int & long_to_short_timer,
                const string & command_line ) 
     : next_delivery_( 0 ),
-      schedule_(),
+      heavy_pdo_schedule_(),
       link_base_timestamp_( timestamp() ),
       packet_queue_( move( packet_queue ) ),
       packet_in_transit_( "", 0 ),
@@ -46,6 +44,7 @@ CellularQueue::CellularQueue( const string & link_name,
       current_link_queue_size_(0),
       repeat_( repeat ),
       finished_( false ),
+      packet_log_enabled_( false ),
       uplink_( uplink ),
       start_timestamp_(start_timestamp),
       delay_pdo_traces_(),
@@ -62,7 +61,6 @@ CellularQueue::CellularQueue( const string & link_name,
       bypass_link_pdo_(true),
       packet_log_path_prefix_(packet_log_path_prefix),
       packet_logs_(),
-      packet_output_logs_(),
       pkt_counter_(0),
       last_received_packet_time_(0),
       loss_rate_(loss_rate),
@@ -75,85 +73,49 @@ CellularQueue::CellularQueue( const string & link_name,
     assert_not_root();
 
     /* open PDO filename and load PDO schedule */
-    ifstream trace_file( pdo_trace_filename );
-    queue<unsigned int> long_pdo_pps;
-    uint64_t temp = 0;
-    uint64_t packet_counter = 0;
+    ifstream heavy_pdo_trace_file( heavy_pdo_trace_filename );
 
-    if ( not trace_file.good() ) {
-        throw runtime_error( pdo_trace_filename + ": error opening for reading" );
+    if ( not heavy_pdo_trace_file.good() ) {
+        throw runtime_error( heavy_pdo_trace_filename + ": error opening for reading" );
     }
 
     string line;
-
-    while ( trace_file.good() and getline( trace_file, line ) ) {
+    /* Read heavy PDO trace */
+    while ( heavy_pdo_trace_file.good() and getline( heavy_pdo_trace_file, line ) ) {
         if ( line.empty() ) {
-            throw runtime_error( pdo_trace_filename + ": invalid empty line" );
+            throw runtime_error( heavy_pdo_trace_filename + ": invalid empty line" );
         }
 
         const uint64_t ms = myatoi( line );
 
-        if ( not schedule_.empty() ) {
-            if (ms >= start_timestamp_) {
-                if ( (ms - start_timestamp_) < schedule_.back() ) {
-                    throw runtime_error( pdo_trace_filename + ": timestamps must be monotonically nondecreasing" );
-                }    
-            }
-        }
-
         if (ms >= start_timestamp_) {
+            if (! heavy_pdo_schedule_.empty()) {
+                if ( (ms - start_timestamp_) < heavy_pdo_schedule_.back() ) {
+                    throw runtime_error( heavy_pdo_trace_filename + ": timestamps must be monotonically nondecreasing" );
+                } 
+            }
+
             uint64_t time = ms - start_timestamp_;
-            if (time - temp > 1000) {
-                temp = time;
-                long_pdo_pps.push(packet_counter);
-                packet_counter = 1;
-            } else {
-                packet_counter++;
-            }
-            schedule_.emplace_back( time );
+            heavy_pdo_schedule_.emplace_back( time );
         }
     }
 
-    if (schedule_.size() <= 0) {
-        cout << "Start timestamp is larger than the max bandwidth timestamp, ingoring the start_timestamp!" << endl;
-        // Re-read the trace_file and now we include all traces ignoring the start_timestamp_
-        trace_file.clear();
-        trace_file.seekg(0);
-        while ( trace_file.good() and getline( trace_file, line ) ) {
-            if ( line.empty() ) {
-                throw runtime_error( pdo_trace_filename + ": invalid empty line" );
-            }
-
-            const uint64_t ms = myatoi( line );
-
-            if ( not schedule_.empty() ) {
-                if ( ms < schedule_.back() ) {
-                    throw runtime_error( pdo_trace_filename + ": timestamps must be monotonically nondecreasing" );
-                }    
-            }
-
-            schedule_.emplace_back( ms );
-        }
+    if ( heavy_pdo_schedule_.empty() ) {
+        throw runtime_error( heavy_pdo_trace_filename + ": no valid timestamps found" );
     }
 
-    if ( schedule_.empty() ) {
-        throw runtime_error( pdo_trace_filename + ": no valid timestamps found" );
-    }
-
-    if ( schedule_.back() == 0 ) {
-        throw runtime_error( pdo_trace_filename + ": trace must last for a nonzero amount of time" );
+    if ( heavy_pdo_schedule_.back() == 0 ) {
+        throw runtime_error( heavy_pdo_trace_filename + ": trace must last for a nonzero amount of time" );
     }
 
 
-    /*** Initiate delay queue ***/
-     /* open filename and load schedule */
+    /*** Read delay and light_pdo trace ***/
     ifstream packet_train_trace_file( packet_train_trace_filename );
 
     if ( not packet_train_trace_file.good() ) {
         throw runtime_error( packet_train_trace_filename + ": error opening for reading" );
     }
 
-    temp = 0;
     while ( packet_train_trace_file.good() and getline( packet_train_trace_file, line ) ) {
         if ( line.empty() ) {
             throw runtime_error( packet_train_trace_filename + ": invalid empty line" );
@@ -161,74 +123,59 @@ CellularQueue::CellularQueue( const string & link_name,
 
         istringstream iss (line);
         string word;
-        int num = 0;
+        int col = 0;
 
         uint64_t time_ms =  0;
         int first_packet_delay_ms = -1;
         vector<int> packet_delivery_oportunity;
 
         while (getline(iss, word, ' ')) {
-            if (num == 0) {
+            if (col == 0) { // First column is timestamp
                 time_ms = myatoi(word);
-            } else if (num == 1) {
+            } else if (col == 1) { // Second column is the base delay
                 first_packet_delay_ms = myatoi(word);
-            } else {
+            } else { // The rest is the light PDOs
                 int pdo = myatoi(word);
                 packet_delivery_oportunity.push_back(pdo);
             }
-            num++;
+            col++;
         }
 
         assert(first_packet_delay_ms >= 0);
 
-        if ( not delay_pdo_traces_.empty() ) {
-            if (time_ms >= start_timestamp_) {
+        if (time_ms >= start_timestamp_) {
+            if ( ! delay_pdo_traces_.empty() ) {
                 if ( (time_ms - start_timestamp_) < delay_pdo_traces_.back().time ) {
                     throw runtime_error( packet_train_trace_filename + ": timestamps must be monotonically nondecreasing" );
-                }    
+                }
             }
-        }
 
-        if (time_ms >= start_timestamp_) {
             uint64_t time = time_ms - start_timestamp_;
             DelayPDOInstance instance(time, first_packet_delay_ms, packet_delivery_oportunity);
             delay_pdo_traces_.push_back( instance );
-            // cout << time << " " << pdo_duration_ms << " " << first_packet_delay_ms << " [";
-            // for (int i=0; i<packet_delivery_oportunity.size(); i++) {
-            //     cout << packet_delivery_oportunity.at(i) << ",";
-            // }
-            // cout << "]" << endl;
         }
     }
+
     if (delay_pdo_traces_.size() <= 2) {
         throw runtime_error( packet_train_trace_filename + ": there should be at least three lines" );
     }
 
     /* open packet logfile */
-    string packet_log_filename = packet_log_path_prefix_ + "/packet-log-" + (uplink_ ? "uplink" : "downlink");
-    packet_logs_.reset( new ofstream( packet_log_filename ) );
-    if ( not packet_logs_->good() ) {
-        throw runtime_error( packet_log_filename + ": error opening for writing" );
+    if (packet_log_path_prefix_ != "") {
+        string packet_log_filename = packet_log_path_prefix_ + "/packet-log-" + (uplink_ ? "uplink" : "downlink");
+        packet_logs_.reset( new ofstream( packet_log_filename ) );
+        if (not packet_logs_->good()) {
+            throw runtime_error( packet_log_filename + ": error opening for writing" );
+        }
+        *packet_logs_ << "Packet train trace filename=" << packet_train_trace_filename << endl;
+        *packet_logs_ << "Link filename=" << heavy_pdo_trace_filename << endl;
+        // SEQ_NUM, ip_port, arrival_time, release_time, total_delay, bypass_link_queue, heavyPDO_queue_delay 
+        *packet_logs_ << "Seq_num \t packet_ip_port \t arrival_time_ms \t relase_time_ms \t total_delay_ms \t is_lightPDO_only \t heavyPDO_queue_delay" << endl;
+        
+        packet_log_enabled_ = true;
     }
-    *packet_logs_ << "Seq_num \t recv_time_ms \t protocol \t src_ip_port \t dst_ip_port \t packet_size \t delay_queue \t is_bypass_link_queue \t release_time_from_delay_queue" << endl;
 
-    string packet_log_output_filename = packet_log_path_prefix_ + "/packet-log-output-" + (uplink_ ? "uplink" : "downlink");
-    packet_output_logs_.reset( new ofstream( packet_log_output_filename ) );
-    if (not packet_output_logs_->good()) {
-        throw runtime_error( packet_log_output_filename + ": error opening for writing" );
-    }
-    *packet_output_logs_ << "Packet train trace filename=" << packet_train_trace_filename << endl;
-    *packet_output_logs_ << "Link filename=" << pdo_trace_filename << endl;
-    *packet_output_logs_ << "Seq_num \t recv_time_ms \t protocol \t src_ip_port \t dst_ip_port \t packet_size \t total_delay \t is_bypass_link_queue \t final_release_time \t link_queue_delay" << endl;
-
-    // for (unsigned int i=0; i<delay_pdo_traces_.size(); i++) {
-    //     cout << delay_pdo_traces_[i].time << " " << delay_pdo_traces_[i].delay << " [";
-    //     for (auto & x : delay_pdo_traces_[i].pdo) {
-    //         cout << x << ",";
-    //     } 
-    //     cout << "]" << endl;
-    // }
-
+    /*** Read packet size latency offset ***/
     if (psize_latency_offset_trace != "") {
         ifstream offset_file(psize_latency_offset_trace);
         if ( not offset_file.good() ) {
@@ -258,33 +205,6 @@ CellularQueue::CellularQueue( const string & link_name,
         }
         offset_file.close();
     }
-    if (uplink_) {
-        cout << "Latency offset uplink = [";    
-    } else {
-        cout << "Latency offset downlink = [";
-    }
-    
-    for (int i=0; i<psize_latency_offset_.size(); i++) {
-        cout << psize_latency_offset_[i] << ",";
-    }
-    cout << "]" << endl;
-
-    // // Test
-    // uint64_t now = timestamp();
-    // start_tick_ = true;        
-    // link_base_timestamp_ = now;
-    // delay_base_timestamp_ =  now;
-
-    // int times[] = {120, 125, 130, 200, 220, 250, 252, 253, 254, 255, 256, 257, 258, 259, 260};
-    // int prev_time = now;
-    // for (auto time: times) {
-    //     int departure_time = now + time;
-    //     int interdeparture_gap_ms = departure_time - prev_time;
-    //     cout << interdeparture_gap_ms << endl;
-    //     prev_time = departure_time;
-    //     int release_time = get_pkt_release_time_from_trace(departure_time, delay_pdo_traces_, interdeparture_gap_ms, 400);
-    //     cout << (uplink_ ? "Uplink" : "Downlink") << ": Delay = " << release_time - departure_time << ", dep time=" << departure_time << ", release_time=" << release_time << ", bypass_link_pdo=" << bypass_link_pdo_ << endl;
-    // }
 
 }
 
@@ -293,18 +213,18 @@ uint64_t CellularQueue::next_delivery_time( void ) const
     if ( finished_ ) {
         return -1;
     } else {
-        return schedule_.at( next_delivery_ ) + link_base_timestamp_;
+        return heavy_pdo_schedule_.at( next_delivery_ ) + link_base_timestamp_;
     }
 }
 
 void CellularQueue::use_a_delivery_opportunity( void )
 {
-    next_delivery_ = (next_delivery_ + 1) % schedule_.size();
+    next_delivery_ = (next_delivery_ + 1) % heavy_pdo_schedule_.size();
 
     /* wraparound */
     if ( next_delivery_ == 0 ) {
         if ( repeat_ ) {
-            link_base_timestamp_ += schedule_.back();
+            link_base_timestamp_ += heavy_pdo_schedule_.back();
         } else {
             finished_ = true;
         }
@@ -394,23 +314,31 @@ void CellularQueue::write_packets_from_link_queue( FileDescriptor & fd )
         // Print output log
         int total_delay = now - packet.initial_arrival_time;   
         int link_queue_delay = now - packet.arrival_time;
-        *packet_output_logs_ << packet.sequence_number << "\t" << packet.initial_arrival_time << "\t" << packet.ip_port_info << "\t" << packet.contents.size() << "\t" << total_delay << "\t" << "false" << "\t" << now << "\t" << link_queue_delay << endl;
+        if (packet_log_enabled_) {
+            // SEQ_NUM, ip_port, arrival_time, release_time, total_delay, bypass_link_queue, heavyPDO_queue_delay   
+            *packet_logs_ << packet.sequence_number << "\t" << packet.ip_port_info << "\t" << packet.initial_arrival_time  << "\t" << now << "\t" << total_delay << "\t" << "false" << "\t" << link_queue_delay << endl; 
+        }
     }
 }
 
 
+/**
+ * This function (1) move packets from delay queue (base delay + light PDO queue) to link queue (heavy PDO queue) 
+ * and (2) write packets from link_queue to the endpoint file descriptor.
+ */  
 void CellularQueue::write_packets( FileDescriptor & fd ) {
-    // Move packets from delay_queue to link_queue
+    /* Move packets from delay_queue to link_queue */
     DelayQueuePacket next_packet = get_next_from_delay_queue();
     uint64_t now = timestamp();
     while ( not next_packet.contents.empty() ) {      
         if (next_packet.is_bypass_link_queue && current_link_queue_size_ == 0) {     
             fd.write( next_packet.contents );
             int total_delay = now - next_packet.arrival_time;
-            // SEQ_NUM, arrival_time, ip_port, release_time, total_delay, bypass_link_queue   
-            *packet_output_logs_ << next_packet.sequence_number << "\t" << next_packet.arrival_time << "\t" << next_packet.ip_port_info << "\t" << next_packet.contents.size() << "\t" << total_delay << "\t" << "true" << "\t" << now << "\t" << 0 << "\t" << packet_queue_->size_packets() << endl;  
+            if (packet_log_enabled_) {
+                // SEQ_NUM, ip_port, arrival_time, release_time, total_delay, bypass_link_queue, heavyPDO_queue_delay   
+                *packet_logs_ << next_packet.sequence_number << "\t" << next_packet.ip_port_info << "\t" << next_packet.arrival_time  << "\t" << now << "\t" << total_delay << "\t" << "true" << "\t" << "0" << endl; 
+            }
         } else {
-            // *packet_output_logs_ << next_packet.sequence_number << "\t" << next_packet.arrival_time << "\t" << "PUT_TO_LINK_QUEUE_NOW" << "\t" << now << endl;
             put_packet_to_link_queue( now, next_packet );    
         }
         next_packet = get_next_from_delay_queue();
@@ -455,7 +383,6 @@ unsigned int CellularQueue::wait_time( void )
 {
     unsigned int wait_time_delay = wait_time_delay_queue();
     unsigned int wait_time_link = wait_time_link_queue();
-    // cout << "Wait time delay=" << wait_time_delay << ", link=" << wait_time_link << endl;
     return min(wait_time_delay, wait_time_link);
 }
 
@@ -464,10 +391,11 @@ bool CellularQueue::pending_output( void ) {
 }
 
 
-// Inactivity timer 
-
-// Assumption is INTERDEPARTURE_THRESHOLD_MS is less than time gap between two entries in the packet train trace.
-uint64_t CellularQueue::get_pkt_release_time_from_trace(const uint64_t & time, const vector<DelayPDOInstance> & delay_pdo_trace, const int & interdeparture_gap_ms, const unsigned int & packet_size) {
+// Get the packet release time from base delay + light PDOs.
+// Get a new base delay and light PDOs if start_new_short_pdo_trace is true
+// bypass_link_pdo_ is a flag that control whether this packet should skip heavy PDO queue or not.
+// A packet should skip heavy PDO queue if it still belongs to the light PDO. 
+uint64_t CellularQueue::get_pkt_release_time_from_trace(const uint64_t & time, const vector<DelayPDOInstance> & delay_pdo_trace, const unsigned int & packet_size) {
     int64_t relative_timestamp_ms = (time - delay_base_timestamp_);
     uint64_t delay_ms = 0;
     uint64_t release_time = time;
@@ -475,7 +403,7 @@ uint64_t CellularQueue::get_pkt_release_time_from_trace(const uint64_t & time, c
 
     int branch = -1;
     
-    // Start a new short pdo trace when the base station queue is empy for long_to_short_timer_
+    // Start a new short pdo trace when the queue is empty for long_to_short_timer_
     // Or when the system start (current_base_delay_  < 0)
     bool start_new_short_pdo_trace = (current_base_delay_ < 0) || (time + current_base_delay_ > last_delay_queue_release_time_ + long_to_short_timer_);
 
@@ -494,7 +422,6 @@ uint64_t CellularQueue::get_pkt_release_time_from_trace(const uint64_t & time, c
             
         }
 
-        // assert(delay_pdo_trace[current_delay_pdo_idx_].time <= relative_timestamp_ms && delay_pdo_trace[current_delay_pdo_idx_ + 1].time > relative_timestamp_ms);
         current_pdo_size_ = delay_pdo_trace[current_delay_pdo_idx_].pdo.size();
         
         // Interpolate the base delay through linear regression
@@ -509,44 +436,43 @@ uint64_t CellularQueue::get_pkt_release_time_from_trace(const uint64_t & time, c
         bypass_link_pdo_ = true;
         pdo_base_timestamp_ = relative_timestamp_ms;
         current_pdo_idx_ = 0;
-        curr_delivery_opportunity_ = 1400 - packet_size;
+        curr_delivery_opportunity_ = PACKET_SIZE - packet_size;
         branch = 1;
     } else {
         // Use the current Short PDO
         int64_t timestamp_from_pdo_base = relative_timestamp_ms - pdo_base_timestamp_;
 
-        // Find the correct trace
+        // Find the correct PDO time
         while (current_pdo_idx_ < current_pdo_size_ && timestamp_from_pdo_base > delay_pdo_trace[current_delay_pdo_idx_].pdo[current_pdo_idx_]) {
             current_pdo_idx_ += 1;
-            curr_delivery_opportunity_ = 1400;
+            curr_delivery_opportunity_ = PACKET_SIZE;
         }    
 
         if (curr_delivery_opportunity_ < packet_size) {
             current_pdo_idx_ += 1;
-            curr_delivery_opportunity_ = 1400;
+            curr_delivery_opportunity_ = PACKET_SIZE;
         }
 
-        // Burn delivery opportunity
+        // Burn a delivery opportunity
         curr_delivery_opportunity_ = curr_delivery_opportunity_ - packet_size;
         
-        if (current_pdo_idx_ >= current_pdo_size_) {
+        if (current_pdo_idx_ >= current_pdo_size_) { // This packet uses to light PDO
             bypass_link_pdo_ = false;
             release_time = max(time + current_base_delay_,  time + delay_pdo_trace[current_delay_pdo_idx_].pdo[current_pdo_size_ - 1]);
             branch = 2;
-        } else {
+        } else { // This packet already exceed the light PDO and it should use heavy PDO
             assert(delay_pdo_trace[current_delay_pdo_idx_].pdo[current_pdo_idx_] >= timestamp_from_pdo_base);
             release_time = time + current_base_delay_ + (delay_pdo_trace[current_delay_pdo_idx_].pdo[current_pdo_idx_] - timestamp_from_pdo_base);
             bypass_link_pdo_ = true; 
             branch = 3;
-        } 
-        // cout << "total delay = " << release_time - time << ", delay_pdo_back=" << delay_pdo_trace[current_delay_pdo_idx_].pdo.back() << ",bypass link pdo=" << bypass_link_pdo_ << endl;
+        }
     }   
     last_delay_queue_release_time_ = release_time; 
     return release_time;
 }
 
-uint64_t CellularQueue::get_pkt_release_time(const uint64_t & time, const string & contents, const int & interdeparture_gap_ms) {
-    uint64_t release_time = get_pkt_release_time_from_trace(time, delay_pdo_traces_, interdeparture_gap_ms, contents.size());
+uint64_t CellularQueue::get_pkt_release_time(const uint64_t & time, const string & contents) {
+    uint64_t release_time = get_pkt_release_time_from_trace(time, delay_pdo_traces_, contents.size());
     return release_time;
 }
 
@@ -623,103 +549,50 @@ double CellularQueue::get_psize_latency_offset(const unsigned int & psize) {
 void CellularQueue::read_packet( const string & contents )
 {
     if (contents.size() < sizeof(struct iphdr)) {
-        throw new runtime_error("Packet too small!");
+        throw new runtime_error("Packet is too small!");
+    }
+    
+    if (contents.size() > PACKET_SIZE) {
+        throw new runtime_error("Packet size (" + to_string(contents.size()) + ")  exceeds the maximum allowed (" + to_string(PACKET_SIZE) + ")" ); 
     }
 
+    uint64_t now = timestamp();
+    
     const char* pkt = contents.data();
     const struct iphdr *h = (struct iphdr *)(pkt + 4);
-    uint64_t now = timestamp();
     string ip_port_info = get_pkt_header_info(h);
 
-    uint64_t interdeparture_gap_ms = now - last_received_packet_time_;
-    last_received_packet_time_ = now;
-
     if (!start_tick_) {
+        // The trace is started
         start_tick_ = true;        
         link_base_timestamp_ = now;
         delay_base_timestamp_ =  now;
     }
 
-    bool uplink = false;
-    if (REVERSE_DIRECTION) {
-        uplink = !uplink_;
-    } else {
-        uplink = uplink_;
-    }
+    // Packet release time from base delay + light PDOs
+    uint64_t release_time = get_pkt_release_time(now, contents);
 
-    // Packet release time from delay_queue
-    uint64_t release_time = get_pkt_release_time(now, contents, interdeparture_gap_ms);
-    // release_time = now + 35;
-    // if (! uplink) {
-    //     release_time = now + 30;
-    // }
-    
-    // if (!uplink) {
-    //     release_time = now + 35;    
-    // }
-    // if (release_time > 10) {
-    //     int delay = release_time - now;
-    //     if (delay > 35) {
-    //         cout << "Extra delay = " << delay - 30 << endl;
-    //     }
-    //     release_time = now + 35;  
-    // }
-
-    // cout << "Curr delay pdo idx=" << current_delay_pdo_idx_ << endl;
-    
-    // if (!uplink_) {
-    //     int added_delay = 0;
-    //     // TODO: apply the possible added delay from RRC
-    //     release_time += added_delay;
-    // } else {
-    //     int added_delay = 0;
-    //     // TODO: apply the possible added delay from RRC
-    //     release_time += added_delay;
-    // }
-    
-
-    // Apply latency offset adjustment based on psize
+    // Apply latency offset adjustment based on psize, but apply this only if it does not cause out-of-order
     int latency_offset = int(round(get_psize_latency_offset(contents.size())));
-    // // cout << "Latency offset = " << latency_offset << endl;
     if (release_time + latency_offset >= end_release_time_) {
         release_time = release_time + latency_offset;
     }
 
-
-    // if (uplink_) {
-    //     cout << "Test cases uplink:" << endl;    
-    // } else {
-    //     cout << "Test cases downlink:" << endl;
-    // }
-    
-
-    // int tests[] = {250, 1350, 1250};
-    // for (int i=0; i < sizeof(tests) / sizeof(int); i++) {
-    //     cout << "size " << tests[i] << " = " << get_psize_latency_offset(tests[i]) << endl;    
-    // }
-
-    
-
     if (release_time < end_release_time_) {
         release_time = end_release_time_;
         bypass_link_pdo_ = false;
-        // cout << "release time is lower than end_release_time_" << endl;
-        // if (!uplink_) {
-        //     cout << "release_time is lower than end_release_time_" << endl;    
-        // }
     }
 
     assert(release_time >= end_release_time_);
     end_release_time_ = release_time;
     uint64_t delay_ms = release_time - now;
 
-    // bypass_link_pdo_ = false;
-
-    bool lost = false;
-
     delay_packet_queue_.emplace(DelayQueuePacket(contents, ip_port_info, now, pkt_counter_, release_time, bypass_link_pdo_));
 
-    *packet_logs_ << pkt_counter_ << "\t" << now << "\t" << get_pkt_header_info(h) << "\t" << contents.size() << "\t" << delay_ms << "\t" << (bypass_link_pdo_ ? "true" : "false") << endl;
+    if (packet_log_enabled_) {
+        *packet_logs_ << pkt_counter_ << "\t" << now << "\t" << get_pkt_header_info(h) << "\t" << contents.size() << "\t" << delay_ms << "\t" << (bypass_link_pdo_ ? "true" : "false") << endl;
+    }
+    
     pkt_counter_++;
 
 }

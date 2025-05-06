@@ -12,22 +12,18 @@
 #include <fstream>
 #include <memory>
 
-// #include "delay_queue.hh"
-// #include "link_queue.hh"
-// #include "packet_decision.hh"
 #include "abstract_packet_queue.hh"
 #include "file_descriptor.hh"
-#include "binned_livegraph.hh"
 
 using namespace std;
 
 class CellularQueue
 {
 private:
-    const static unsigned int PACKET_SIZE = 1504; /* default max TUN payload size */
+    const static unsigned int PACKET_SIZE = 1400; /* MAX_PACKET_SIZE */
     /*** Link queue ***/
     unsigned int next_delivery_;
-    std::vector<uint64_t> schedule_;
+    std::vector<uint64_t> heavy_pdo_schedule_;
     uint64_t link_base_timestamp_;
 
     std::unique_ptr<AbstractPacketQueue> packet_queue_;
@@ -38,6 +34,7 @@ private:
 
     bool repeat_;
     bool finished_;
+    bool packet_log_enabled_;
 
     bool uplink_;
     uint64_t start_timestamp_;
@@ -102,7 +99,6 @@ private:
 
     const std::string packet_log_path_prefix_;
     std::unique_ptr<std::ofstream> packet_logs_;
-    std::unique_ptr<std::ofstream> packet_output_logs_;
     
     uint64_t pkt_counter_;
     uint64_t last_received_packet_time_;
@@ -126,19 +122,19 @@ private:
     unsigned int wait_time_link_queue( void );
 
     // Functions for getting packet delay from delay trace
-    uint64_t get_pkt_release_time(const uint64_t & time, const string & contents, const int & interdeparture_gap_ms);
-    uint64_t get_pkt_release_time_from_trace(const uint64_t & time, const vector<DelayPDOInstance> & delay_pdo_trace, const int & interdeparture_gap_ms, const unsigned int & packet_size);
+    uint64_t get_pkt_release_time(const uint64_t & time, const string & contents);
+    uint64_t get_pkt_release_time_from_trace(const uint64_t & time, const vector<DelayPDOInstance> & delay_pdo_trace, const unsigned int & packet_size);
 
     double get_psize_latency_offset(const unsigned int & pkt_size);
 
 public:
     CellularQueue( const string & link_name, 
                    const string & packet_train_trace_filename, const string & pdo_trace_filename, 
-                   const string & packet_log_path_prefix, const string & logfile,
+                   const string & packet_log_path_prefix, 
                    const bool repeat, 
                    unique_ptr<AbstractPacketQueue> && packet_queue, 
                    bool uplink, uint64_t start_timestamp,
-                   const double & loss_rate, const string & drx_trace,
+                   const double & loss_rate,
                    const string & psize_latency_offset_trace,
                    const int & long_to_short_timer,
                    const string & command_line );

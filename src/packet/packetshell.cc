@@ -36,6 +36,9 @@ PacketShell<FerryQueueType>::PacketShell( const std::string & device_prefix, cha
       pipe_( UnixDomainSocket::make_pair() ),
       event_loop_()
 {
+    if (device_prefix.size() > 12) {
+        throw runtime_error("PacketShell: device prefix is too long!");
+    }
     /* make sure environment has been cleared */
     if ( environ != nullptr ) {
         throw runtime_error( "PacketShell: environment was not cleared" );
@@ -58,6 +61,9 @@ PacketShell<FerryQueueType>::PacketShell( const std::string & device_prefix,
       pipe_( UnixDomainSocket::make_pair() ),
     event_loop_()
 {
+    if (device_prefix.size() > 12) {
+        throw runtime_error("PacketShell: device prefix is too long!");
+    }
     /* make sure environment has been cleared */
     if ( environ != nullptr ) {
         throw runtime_error( "PacketShell: environment was not cleared" );

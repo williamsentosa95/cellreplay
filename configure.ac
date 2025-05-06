@@ -69,14 +69,10 @@ AC_TYPE_UINT8_T
 
 # Checks for library functions.
 AC_CHECK_FUNCS([clock_gettime inet_ntoa memset mkdir setenv socket strerror strtol])
-PKG_CHECK_MODULES([XCB], [xcb])
-PKG_CHECK_MODULES([XCBPRESENT], [xcb-present])
-PKG_CHECK_MODULES([PANGOCAIRO], [pangocairo])
 
 AC_CONFIG_FILES([Makefile
      src/Makefile
      src/util/Makefile
      src/packet/Makefile
-     src/graphing/Makefile
      src/frontend/Makefile])
 AC_OUTPUT

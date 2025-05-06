@@ -76,7 +76,7 @@ int main( int argc, char *argv[] )
 
         check_requirements( argc, argv );
 
-        if ( argc < 6 ) {
+        if ( argc < 5 ) {
             usage_error( argv[ 0 ] );
         }
 
@@ -94,21 +94,14 @@ int main( int argc, char *argv[] )
         }
 
         const option command_line_options[] = {
-            { "uplink-log",           required_argument, nullptr, 'u' },
-            { "downlink-log",         required_argument, nullptr, 'd' },
             { "once",                       no_argument, nullptr, 'o' },
-            { "meter-uplink",               no_argument, nullptr, 'm' },
-            { "meter-downlink",             no_argument, nullptr, 'n' },
-            { "meter-uplink-delay",         no_argument, nullptr, 'x' },
-            { "meter-downlink-delay",       no_argument, nullptr, 'y' },
-            { "meter-all",                  no_argument, nullptr, 'z' },
+            { "packet-log-folder",    required_argument, nullptr, 'i' },
             { "uplink-queue",         required_argument, nullptr, 'q' },
             { "downlink-queue",       required_argument, nullptr, 'w' },
             { "uplink-queue-args",    required_argument, nullptr, 'a' },
             { "downlink-queue-args",  required_argument, nullptr, 'b' },
             { "start-timestamp",    required_argument, nullptr, 'c' },
             { "loss-rate",                  required_argument, nullptr, 'r' },
-            { "drx-trace",                  required_argument, nullptr, 'v' },
             { "psize-latency-offset-up",                  required_argument, nullptr, 'e' },
             { "psize-latency-offset-down",                  required_argument, nullptr, 'f' },
             { "long-to-short-timer-up",                  required_argument, nullptr, 'g' },
@@ -116,20 +109,17 @@ int main( int argc, char *argv[] )
             { 0,                                      0, nullptr, 0 },
         };
 
-        string uplink_logfile, downlink_logfile;
         bool repeat = true;
-        bool meter_uplink = false, meter_downlink = false;
-        bool meter_uplink_delay = false, meter_downlink_delay = false;
         string uplink_queue_type = "infinite", downlink_queue_type = "infinite",
                uplink_queue_args, downlink_queue_args;
 
         uint64_t start_timestamp = 0;
         double loss_rate = 0;
-        string drx_trace = "";
         string psize_offset_up = "";
         string psize_offset_down = "";
         int long_to_short_timer_up = 0;
         int long_to_short_timer_down = 0;
+        string packet_log_prefix = "";
 
         while ( true ) {
             const int opt = getopt_long( argc, argv, "u:d:", command_line_options, nullptr );
@@ -138,35 +128,15 @@ int main( int argc, char *argv[] )
             }
 
             switch ( opt ) {
-            case 'u':
-                uplink_logfile = optarg;
-                break;
-            case 'd':
-                downlink_logfile = optarg;
-                break;
             case 'c':
                 start_timestamp = static_cast<uint64_t>(stoul(optarg));
                 cout << "Cellular shell start_timestamp = " << start_timestamp << endl;
                 break;
+            case 'i':
+                packet_log_prefix = optarg;
+                break;
             case 'o':
                 repeat = false;
-                break;
-            case 'm':
-                meter_uplink = true;
-                break;
-            case 'n':
-                meter_downlink = true;
-                break;
-            case 'x':
-                meter_uplink_delay = true;
-                break;
-            case 'y':
-                meter_downlink_delay = true;
-                break;
-            case 'z':
-                meter_uplink = meter_downlink
-                    = meter_uplink_delay = meter_downlink_delay
-                    = true;
                 break;
             case 'q':
                 uplink_queue_type = optarg; 
@@ -183,9 +153,6 @@ int main( int argc, char *argv[] )
             case 'r':
                 loss_rate = static_cast<double>(stod(optarg));
                 break;
-            case 'v':
-                drx_trace = optarg;
-                break;
             case 'e':
                 psize_offset_up = optarg;
                 break;
@@ -199,10 +166,7 @@ int main( int argc, char *argv[] )
                 long_to_short_timer_down = myatoi(optarg);
                 break;
             case '?':
-                //usage_error( argv[ 0 ] );
                 break;
-            // default:
-            //     throw runtime_error( "getopt_long: unexpected return value " + to_string( opt ) );
             }
         }
 
@@ -214,7 +178,6 @@ int main( int argc, char *argv[] )
         const string down_packet_train_trace = argv[ optind + 2];
         const string uplink_pdo_trace = argv[ optind + 3 ];
         const string downlink_pdo_trace = argv[ optind + 4 ];
-        const string packet_log_prefix = argv[ optind + 5 ];
 
         vector<string> command; 
 
@@ -222,7 +185,6 @@ int main( int argc, char *argv[] )
             command.push_back( shell_path() );
         } else {
             for ( unsigned int i = 0; i < extra_cmd.size(); i++ ) {
-                // cout << "Pushed argv " << i << " = " << extra_cmd[i] << endl;
                 command.push_back( extra_cmd[ i ] );
             }
         }
@@ -230,14 +192,14 @@ int main( int argc, char *argv[] )
         PacketShell<CellularQueue> cellular_shell_app( "cell-link", user_environment );
 
         cellular_shell_app.start_uplink( "[cell-link] ", command,
-                                     "Uplink", up_packet_train_trace, uplink_pdo_trace, packet_log_prefix, uplink_logfile, repeat, 
+                                     "Uplink", up_packet_train_trace, uplink_pdo_trace, packet_log_prefix, repeat, 
                                      get_packet_queue( uplink_queue_type, uplink_queue_args, argv[ 0 ] ),
-                                     true, start_timestamp, loss_rate, drx_trace, psize_offset_up, long_to_short_timer_up,
+                                     true, start_timestamp, loss_rate, psize_offset_up, long_to_short_timer_up,
                                      command_line );
 
-        cellular_shell_app.start_downlink( "Downlink", down_packet_train_trace, downlink_pdo_trace, packet_log_prefix, downlink_logfile, repeat, 
+        cellular_shell_app.start_downlink( "Downlink", down_packet_train_trace, downlink_pdo_trace, packet_log_prefix, repeat, 
                                        get_packet_queue( downlink_queue_type, downlink_queue_args, argv[ 0 ] ), 
-                                       false, start_timestamp, loss_rate, drx_trace, psize_offset_down, long_to_short_timer_down,
+                                       false, start_timestamp, loss_rate, psize_offset_down, long_to_short_timer_down,
                                        command_line );
 
         return cellular_shell_app.wait_for_exit();
