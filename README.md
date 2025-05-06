@@ -35,7 +35,7 @@ $ unzip traces/cellular-traces.zip -d traces/
 
 To use the cellreplay emulator, you need to call `mm-cellular`.
 ```sh
-$ mm-cellular NUM_ARGS UP-PACKET-TRAIN-TRACE DOWN-PACKET-TRAIN-TRACE UP-PDO DOWN-PDO PACKET-LOG-PATH-PREFIX [OPTION]... [COMMAND]
+$ mm-cellular NUM_ARGS UP-PACKET-TRAIN-TRACE DOWN-PACKET-TRAIN-TRACE UP-PDO DOWN-PDO [OPTION]... [COMMAND]
 ```
 
 NUM_ARGS = the total number of arguments (including the mm-cellular command itself) \
